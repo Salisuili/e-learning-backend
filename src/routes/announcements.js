@@ -4,6 +4,28 @@ const { supabaseAdmin } = require('../config/supabase');
 const { authenticate, authorize, requireApproval } = require('../middleware/auth');
 
 /**
+ * GET /api/announcements
+ * Get all announcements (admin)
+ */
+router.get('/', authenticate, authorize('admin', 'lecturer'), async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('announcements')
+      .select('*, posted_by:posted_by(full_name, email)')
+      .order('is_pinned', { ascending: false })
+      .order('posted_at', { ascending: false });
+
+    if (error) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    res.json({ announcements: data || [] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
  * GET /api/announcements/course/:courseId
  * Get announcements for a course
  */

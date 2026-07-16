@@ -1,5 +1,7 @@
 const express = require('express');
 const router = express.Router();
+const path = require('path');
+const fs = require('fs');
 const { supabaseAdmin } = require('../config/supabase');
 const { authenticate, authorize, requireApproval } = require('../middleware/auth');
 const upload = require('../middleware/upload');
@@ -282,6 +284,36 @@ router.put('/submissions/:submissionId/grade', authenticate, authorize('lecturer
     }
 
     res.json({ submission: data, message: 'Submission graded successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/assignments/submissions/:submissionId/file
+ * Download a submission file
+ */
+router.get('/submissions/:submissionId/file', authenticate, async (req, res) => {
+  try {
+    const { submissionId } = req.params;
+    
+    const { data, error } = await supabaseAdmin
+      .from('assignment_submissions')
+      .select('submission_file_url, submission_file_name')
+      .eq('id', submissionId)
+      .single();
+    
+    if (error || !data || !data.submission_file_url) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+    
+    const filePath = path.resolve(__dirname, '../../', data.submission_file_url.replace(/^\//, ''));
+    
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'File not found on server' });
+    }
+    
+    res.download(filePath, data.submission_file_name || 'submission');
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

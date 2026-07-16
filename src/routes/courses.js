@@ -5,6 +5,91 @@ const { authenticate, authorize, requireApproval } = require('../middleware/auth
 const upload = require('../middleware/upload');
 
 /**
+ * GET /api/courses/available
+ * Get all available courses for students to browse (with level/department filtering)
+ */
+router.get('/available', authenticate, async (req, res) => {
+  try {
+    const user = req.user;
+    const { level, department } = req.query;
+
+    let query = supabaseAdmin
+      .from('courses')
+      .select('*, lecturer:lecturer_id(full_name, email)')
+      .order('created_at', { ascending: false });
+
+    // Filter by level if provided
+    if (level) {
+      query = query.eq('level', level);
+    }
+
+    // Filter by department
+    if (department) {
+      query = query.eq('department', department);
+    } else if (user.department) {
+      query = query.eq('department', user.department);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    res.json({ courses: data || [] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/courses/levels
+ * Get distinct levels
+ */
+router.get('/levels', authenticate, async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('courses')
+      .select('level')
+      .not('level', 'is', null)
+      .order('level', { ascending: true });
+
+    if (error) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    // Get unique levels
+    const levels = [...new Set(data.map(c => c.level))];
+    res.json({ levels });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/courses/sessions
+ * Get distinct sessions
+ */
+router.get('/sessions', authenticate, async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('courses')
+      .select('session')
+      .not('session', 'is', null)
+      .order('session', { ascending: false });
+
+    if (error) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    const sessions = [...new Set(data.map(c => c.session))];
+    res.json({ sessions });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
  * GET /api/courses
  * Get all courses
  */
@@ -87,7 +172,7 @@ router.get('/:id', authenticate, async (req, res) => {
  */
 router.post('/', authenticate, authorize('lecturer', 'admin'), requireApproval, async (req, res) => {
   try {
-    const { code, title, description, department, lecturer_id, credits, semester, year } = req.body;
+    const { code, title, description, department, lecturer_id, credits, semester, year, level, session } = req.body;
 
     if (!code || !title || !department || !lecturer_id) {
       return res.status(400).json({ error: 'Missing required fields: code, title, department, lecturer_id' });
@@ -102,6 +187,8 @@ router.post('/', authenticate, authorize('lecturer', 'admin'), requireApproval, 
       credits: credits || 3,
       semester: semester || '',
       year: year || new Date().getFullYear(),
+      level: level || '100',
+      session: session || '',
       created_at: new Date().toISOString(),
     };
 
@@ -128,7 +215,7 @@ router.post('/', authenticate, authorize('lecturer', 'admin'), requireApproval, 
 router.put('/:id', authenticate, authorize('lecturer', 'admin'), async (req, res) => {
   try {
     const { id } = req.params;
-    const allowedFields = ['code', 'title', 'description', 'department', 'credits', 'semester', 'year'];
+    const allowedFields = ['code', 'title', 'description', 'department', 'credits', 'semester', 'year', 'level', 'session'];
     const updates = {};
 
     allowedFields.forEach(field => {
