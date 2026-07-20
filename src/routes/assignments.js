@@ -3,7 +3,15 @@ const router = express.Router();
 const { supabaseAdmin } = require('../config/supabase');
 const { authenticate, authorize, requireApproval } = require('../middleware/auth');
 const upload = require('../middleware/upload');
-const storageService = require('../services/storage');
+
+// Helper function to generate unique file path
+const generateStoragePath = (bucket, fileName, userId) => {
+  const timestamp = Date.now();
+  const random = Math.random().toString(36).substring(2, 8);
+  const extension = fileName.split('.').pop() || 'file';
+  const name = fileName.replace(`.${extension}`, '');
+  return `${bucket}/${userId}/${timestamp}_${random}_${name}.${extension}`;
+};
 
 /**
  * GET /api/assignments/course/:courseId
@@ -76,12 +84,38 @@ router.post('/course/:courseId', authenticate, authorize('lecturer', 'admin'), r
       created_at: new Date().toISOString(),
     };
 
+    // Handle file upload if present
     if (req.file) {
-      const storagePath = storageService.generateStoragePath('assignment-submissions', req.file.originalname, req.user.id);
-      const uploadResult = await storageService.uploadFile('assignment-submissions', storagePath, req.file.buffer, req.file.mimetype);
-      assignmentData.assignment_file_url = uploadResult.publicUrl;
-      assignmentData.assignment_file_name = req.file.originalname;
-      assignmentData.assignment_storage_path = uploadResult.storagePath;
+      try {
+        const file = req.file;
+        const storagePath = generateStoragePath('assignments', file.originalname, req.user.id);
+        
+        // Upload to Supabase Storage - course-materials bucket
+        const { data: uploadData, error: uploadError } = await supabaseAdmin.storage
+          .from('course-materials')
+          .upload(storagePath, file.buffer, {
+            contentType: file.mimetype,
+            cacheControl: '3600',
+            upsert: false
+          });
+
+        if (uploadError) {
+          console.error('Assignment file upload error:', uploadError);
+          return res.status(500).json({ error: 'Failed to upload assignment file: ' + uploadError.message });
+        }
+
+        // Get public URL
+        const { data: urlData } = supabaseAdmin.storage
+          .from('course-materials')
+          .getPublicUrl(storagePath);
+
+        assignmentData.assignment_file_url = urlData.publicUrl;
+        assignmentData.assignment_file_name = file.originalname;
+        assignmentData.assignment_storage_path = storagePath;
+      } catch (uploadError) {
+        console.error('File processing error:', uploadError);
+        return res.status(500).json({ error: 'Failed to process file' });
+      }
     }
 
     const { data, error } = await supabaseAdmin
@@ -95,34 +129,6 @@ router.post('/course/:courseId', authenticate, authorize('lecturer', 'admin'), r
     }
 
     res.status(201).json({ assignment: data, message: 'Assignment created successfully' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * GET /api/assignments/:id/file
- * Download an assignment file via signed URL redirect (browser download)
- */
-router.get('/:id/file', authenticate, async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const { data, error } = await supabaseAdmin
-      .from('assignments')
-      .select('assignment_storage_path, assignment_file_name')
-      .eq('id', id)
-      .single();
-
-    if (error || !data || !data.assignment_storage_path) {
-      return res.status(404).json({ error: 'File not found' });
-    }
-
-    // Generate a signed URL that expires in 1 hour
-    const signedUrl = await storageService.getSignedUrl('assignments', data.assignment_storage_path, 3600);
-
-    // Redirect to the signed URL - browser will handle the download
-    res.redirect(signedUrl);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -207,6 +213,17 @@ router.post('/:id/submit', authenticate, authorize('student'), upload.single('su
       return res.status(400).json({ error: 'You have already submitted this assignment' });
     }
 
+    // Log received data
+    console.log('📥 Received submission:', {
+      assignmentId,
+      studentId,
+      submission_text: req.body.submission_text,
+      hasFile: !!req.file,
+      fileOriginalName: req.file?.originalname,
+      fileMimeType: req.file?.mimetype,
+      fileSize: req.file?.size
+    });
+
     const submissionData = {
       assignment_id: assignmentId,
       student_id: studentId,
@@ -214,12 +231,40 @@ router.post('/:id/submit', authenticate, authorize('student'), upload.single('su
       submitted_at: new Date().toISOString(),
     };
 
+    // Handle file upload if present
     if (req.file) {
-      const storagePath = storageService.generateStoragePath('submissions', req.file.originalname, studentId);
-      const uploadResult = await storageService.uploadFile('submissions', storagePath, req.file.buffer, req.file.mimetype);
-      submissionData.submission_file_url = uploadResult.publicUrl;
-      submissionData.submission_file_name = req.file.originalname;
-      submissionData.submission_storage_path = uploadResult.storagePath;
+      try {
+        const file = req.file;
+        const storagePath = generateStoragePath('assignment-submissions', file.originalname, studentId);
+        
+        // Upload to Supabase Storage - assignment-submissions bucket
+        const { data: uploadData, error: uploadError } = await supabaseAdmin.storage
+          .from('assignment-submissions')
+          .upload(storagePath, file.buffer, {
+            contentType: file.mimetype,
+            cacheControl: '3600',
+            upsert: false
+          });
+
+        if (uploadError) {
+          console.error('Submission file upload error:', uploadError);
+          return res.status(500).json({ error: 'Failed to upload submission file: ' + uploadError.message });
+        }
+
+        // Get public URL
+        const { data: urlData } = supabaseAdmin.storage
+          .from('assignment-submissions')
+          .getPublicUrl(storagePath);
+
+        submissionData.submission_file_url = urlData.publicUrl;
+        submissionData.submission_file_name = file.originalname;
+        submissionData.submission_storage_path = storagePath;
+        
+        console.log('✅ File uploaded successfully:', submissionData.submission_file_url);
+      } catch (uploadError) {
+        console.error('File processing error:', uploadError);
+        return res.status(500).json({ error: 'Failed to process file: ' + uploadError.message });
+      }
     }
 
     const { data, error } = await supabaseAdmin
@@ -229,11 +274,14 @@ router.post('/:id/submit', authenticate, authorize('student'), upload.single('su
       .single();
 
     if (error) {
+      console.error('Database error:', error);
       return res.status(400).json({ error: error.message });
     }
 
+    console.log('✅ Submission saved:', data.id);
     res.status(201).json({ submission: data, message: 'Assignment submitted successfully' });
   } catch (error) {
+    console.error('Error:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -341,10 +389,16 @@ router.get('/submissions/:submissionId/file', authenticate, async (req, res) => 
     }
     
     // Generate a signed URL that expires in 1 hour
-    const signedUrl = await storageService.getSignedUrl('submissions', data.submission_storage_path, 3600);
+    const { data: signedUrlData, error: signedUrlError } = await supabaseAdmin.storage
+      .from('assignment-submissions')
+      .createSignedUrl(data.submission_storage_path, 3600);
+    
+    if (signedUrlError) {
+      return res.status(500).json({ error: 'Failed to generate download link' });
+    }
     
     // Redirect to the signed URL - browser will handle the download
-    res.redirect(signedUrl);
+    res.redirect(signedUrlData.signedUrl);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
