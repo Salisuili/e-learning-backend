@@ -77,8 +77,8 @@ router.post('/course/:courseId', authenticate, authorize('lecturer', 'admin'), r
     };
 
     if (req.file) {
-      const storagePath = storageService.generateStoragePath('assignments', req.file.originalname, req.user.id);
-      const uploadResult = await storageService.uploadFile('assignments', storagePath, req.file.buffer, req.file.mimetype);
+      const storagePath = storageService.generateStoragePath('assignment-submissions', req.file.originalname, req.user.id);
+      const uploadResult = await storageService.uploadFile('assignment-submissions', storagePath, req.file.buffer, req.file.mimetype);
       assignmentData.assignment_file_url = uploadResult.publicUrl;
       assignmentData.assignment_file_name = req.file.originalname;
       assignmentData.assignment_storage_path = uploadResult.storagePath;

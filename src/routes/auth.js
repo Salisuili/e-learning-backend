@@ -51,10 +51,10 @@ router.post('/register', upload.single('document'), async (req, res) => {
       created_at: new Date().toISOString(),
     };
 
-    // If a document file was uploaded, upload to Supabase Storage
+    // If a document file was uploaded, upload to Supabase Storage (verification_docs bucket)
     if (req.file) {
-      const storagePath = storageService.generateStoragePath('documents', req.file.originalname, authData.user.id);
-      const uploadResult = await storageService.uploadFile('documents', storagePath, req.file.buffer, req.file.mimetype);
+      const storagePath = storageService.generateStoragePath('verification_docs', req.file.originalname, authData.user.id);
+      const uploadResult = await storageService.uploadFile('verification_docs', storagePath, req.file.buffer, req.file.mimetype);
       newUser.document_url = uploadResult.publicUrl;
       newUser.document_file_name = req.file.originalname;
       newUser.document_storage_path = uploadResult.storagePath;
@@ -170,8 +170,8 @@ router.put('/profile', authenticate, upload.single('avatar'), async (req, res) =
     });
 
     if (req.file) {
-      const storagePath = storageService.generateStoragePath('avatars', req.file.originalname, req.user.id);
-      const uploadResult = await storageService.uploadFile('avatars', storagePath, req.file.buffer, req.file.mimetype);
+      const storagePath = storageService.generateStoragePath('user-avatars', req.file.originalname, req.user.id);
+      const uploadResult = await storageService.uploadFile('user-avatars', storagePath, req.file.buffer, req.file.mimetype);
       updates.avatar_url = uploadResult.publicUrl;
       updates.avatar_storage_path = uploadResult.storagePath;
     }

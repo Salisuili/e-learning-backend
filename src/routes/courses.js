@@ -363,9 +363,9 @@ router.post('/:id/materials', authenticate, authorize('lecturer', 'admin'), uplo
 
     const { title, description } = req.body;
 
-    // Upload file to Supabase Storage
-    const storagePath = storageService.generateStoragePath('materials', req.file.originalname, req.user.id);
-    const uploadResult = await storageService.uploadFile('materials', storagePath, req.file.buffer, req.file.mimetype);
+    // Upload file to Supabase Storage (course-materials bucket)
+    const storagePath = storageService.generateStoragePath('course-materials', req.file.originalname, req.user.id);
+    const uploadResult = await storageService.uploadFile('course-materials', storagePath, req.file.buffer, req.file.mimetype);
 
     const materialData = {
       course_id: courseId,
@@ -439,7 +439,7 @@ router.get('/materials/:materialId/file', authenticate, async (req, res) => {
     }
 
     // Generate a signed URL that expires in 1 hour
-    const signedUrl = await storageService.getSignedUrl('materials', data.storage_path, 3600);
+    const signedUrl = await storageService.getSignedUrl('course-materials', data.storage_path, 3600);
 
     // Redirect to the signed URL - browser will handle the download
     res.redirect(signedUrl);
