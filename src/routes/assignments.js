@@ -1,10 +1,9 @@
 const express = require('express');
 const router = express.Router();
-const path = require('path');
-const fs = require('fs');
 const { supabaseAdmin } = require('../config/supabase');
 const { authenticate, authorize, requireApproval } = require('../middleware/auth');
 const upload = require('../middleware/upload');
+const storageService = require('../services/storage');
 
 /**
  * GET /api/assignments/course/:courseId
@@ -78,8 +77,11 @@ router.post('/course/:courseId', authenticate, authorize('lecturer', 'admin'), r
     };
 
     if (req.file) {
-      assignmentData.assignment_file_url = `/uploads/submissions/${req.file.filename}`;
+      const storagePath = storageService.generateStoragePath('assignments', req.file.originalname, req.user.id);
+      const uploadResult = await storageService.uploadFile('assignments', storagePath, req.file.buffer, req.file.mimetype);
+      assignmentData.assignment_file_url = uploadResult.publicUrl;
       assignmentData.assignment_file_name = req.file.originalname;
+      assignmentData.assignment_storage_path = uploadResult.storagePath;
     }
 
     const { data, error } = await supabaseAdmin
@@ -93,6 +95,34 @@ router.post('/course/:courseId', authenticate, authorize('lecturer', 'admin'), r
     }
 
     res.status(201).json({ assignment: data, message: 'Assignment created successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/assignments/:id/file
+ * Download an assignment file via signed URL redirect (browser download)
+ */
+router.get('/:id/file', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { data, error } = await supabaseAdmin
+      .from('assignments')
+      .select('assignment_storage_path, assignment_file_name')
+      .eq('id', id)
+      .single();
+
+    if (error || !data || !data.assignment_storage_path) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+
+    // Generate a signed URL that expires in 1 hour
+    const signedUrl = await storageService.getSignedUrl('assignments', data.assignment_storage_path, 3600);
+
+    // Redirect to the signed URL - browser will handle the download
+    res.redirect(signedUrl);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -185,8 +215,11 @@ router.post('/:id/submit', authenticate, authorize('student'), upload.single('su
     };
 
     if (req.file) {
-      submissionData.submission_file_url = `/uploads/submissions/${req.file.filename}`;
+      const storagePath = storageService.generateStoragePath('submissions', req.file.originalname, studentId);
+      const uploadResult = await storageService.uploadFile('submissions', storagePath, req.file.buffer, req.file.mimetype);
+      submissionData.submission_file_url = uploadResult.publicUrl;
       submissionData.submission_file_name = req.file.originalname;
+      submissionData.submission_storage_path = uploadResult.storagePath;
     }
 
     const { data, error } = await supabaseAdmin
@@ -291,7 +324,7 @@ router.put('/submissions/:submissionId/grade', authenticate, authorize('lecturer
 
 /**
  * GET /api/assignments/submissions/:submissionId/file
- * Download a submission file
+ * Generate a signed URL for secure download and redirect the browser
  */
 router.get('/submissions/:submissionId/file', authenticate, async (req, res) => {
   try {
@@ -299,21 +332,19 @@ router.get('/submissions/:submissionId/file', authenticate, async (req, res) => 
     
     const { data, error } = await supabaseAdmin
       .from('assignment_submissions')
-      .select('submission_file_url, submission_file_name')
+      .select('submission_storage_path, submission_file_name')
       .eq('id', submissionId)
       .single();
     
-    if (error || !data || !data.submission_file_url) {
+    if (error || !data || !data.submission_storage_path) {
       return res.status(404).json({ error: 'File not found' });
     }
     
-    const filePath = path.resolve(__dirname, '../../', data.submission_file_url.replace(/^\//, ''));
+    // Generate a signed URL that expires in 1 hour
+    const signedUrl = await storageService.getSignedUrl('submissions', data.submission_storage_path, 3600);
     
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ error: 'File not found on server' });
-    }
-    
-    res.download(filePath, data.submission_file_name || 'submission');
+    // Redirect to the signed URL - browser will handle the download
+    res.redirect(signedUrl);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

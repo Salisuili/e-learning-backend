@@ -1,46 +1,11 @@
 const multer = require('multer');
 const path = require('path');
-const fs = require('fs');
 
-// Ensure upload directories exist
-const createDirIfNotExist = (dir) => {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-};
-
-const uploadDir = path.resolve(__dirname, '../../uploads');
-const avatarsDir = path.join(uploadDir, 'avatars');
-const documentsDir = path.join(uploadDir, 'documents');
-const materialsDir = path.join(uploadDir, 'materials');
-const submissionsDir = path.join(uploadDir, 'submissions');
-
-[uploadDir, avatarsDir, documentsDir, materialsDir, submissionsDir].forEach(createDirIfNotExist);
-
-// Configure storage
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    let destDir = uploadDir;
-
-    // Determine destination based on file type/field
-    if (req.baseUrl.includes('auth') || file.fieldname === 'avatar') {
-      destDir = avatarsDir;
-    } else if (file.fieldname === 'document' || file.fieldname === 'identification_document') {
-      destDir = documentsDir;
-    } else if (file.fieldname === 'material' || file.fieldname === 'course_material') {
-      destDir = materialsDir;
-    } else if (file.fieldname === 'submission' || file.fieldname === 'assignment_file') {
-      destDir = submissionsDir;
-    }
-
-    cb(null, destDir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const ext = path.extname(file.originalname);
-    cb(null, `${file.fieldname}-${uniqueSuffix}${ext}`);
-  }
-});
+/**
+ * Multer middleware configured with memory storage.
+ * Files are stored in memory (buffer) so they can be uploaded to Supabase Storage.
+ * The backend no longer saves files to the local filesystem.
+ */
 
 // File filter - allow common document types
 const fileFilter = (req, file, cb) => {
@@ -73,6 +38,9 @@ const fileFilter = (req, file, cb) => {
     cb(new Error(`File type ${file.mimetype} is not allowed`), false);
   }
 };
+
+// Use memory storage - files will be uploaded to Supabase Storage
+const storage = multer.memoryStorage();
 
 const upload = multer({
   storage,

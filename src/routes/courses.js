@@ -3,6 +3,7 @@ const router = express.Router();
 const { supabaseAdmin } = require('../config/supabase');
 const { authenticate, authorize, requireApproval } = require('../middleware/auth');
 const upload = require('../middleware/upload');
+const storageService = require('../services/storage');
 
 /**
  * GET /api/courses/available
@@ -362,14 +363,19 @@ router.post('/:id/materials', authenticate, authorize('lecturer', 'admin'), uplo
 
     const { title, description } = req.body;
 
+    // Upload file to Supabase Storage
+    const storagePath = storageService.generateStoragePath('materials', req.file.originalname, req.user.id);
+    const uploadResult = await storageService.uploadFile('materials', storagePath, req.file.buffer, req.file.mimetype);
+
     const materialData = {
       course_id: courseId,
       title: title || req.file.originalname,
       description: description || '',
-      file_url: `/uploads/materials/${req.file.filename}`,
+      file_url: uploadResult.publicUrl,
       file_name: req.file.originalname,
       file_size: req.file.size,
       file_type: req.file.mimetype,
+      storage_path: uploadResult.storagePath,
       uploaded_by: req.user.id,
       uploaded_at: new Date().toISOString(),
     };
@@ -409,6 +415,34 @@ router.get('/:id/materials', authenticate, async (req, res) => {
     }
 
     res.json({ materials: data || [] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/courses/materials/:materialId/file
+ * Download a course material file via signed URL redirect (browser download)
+ */
+router.get('/materials/:materialId/file', authenticate, async (req, res) => {
+  try {
+    const { materialId } = req.params;
+
+    const { data, error } = await supabaseAdmin
+      .from('course_materials')
+      .select('storage_path, file_name')
+      .eq('id', materialId)
+      .single();
+
+    if (error || !data || !data.storage_path) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+
+    // Generate a signed URL that expires in 1 hour
+    const signedUrl = await storageService.getSignedUrl('materials', data.storage_path, 3600);
+
+    // Redirect to the signed URL - browser will handle the download
+    res.redirect(signedUrl);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

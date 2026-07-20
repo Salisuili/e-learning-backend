@@ -5,6 +5,7 @@ const jwt = require('jsonwebtoken');
 const { supabaseAnon, supabaseAdmin } = require('../config/supabase');
 const { authenticate } = require('../middleware/auth');
 const upload = require('../middleware/upload');
+const storageService = require('../services/storage');
 
 /**
  * POST /api/auth/register
@@ -50,10 +51,13 @@ router.post('/register', upload.single('document'), async (req, res) => {
       created_at: new Date().toISOString(),
     };
 
-    // If a document file was uploaded
+    // If a document file was uploaded, upload to Supabase Storage
     if (req.file) {
-      newUser.document_url = `/uploads/documents/${req.file.filename}`;
+      const storagePath = storageService.generateStoragePath('documents', req.file.originalname, authData.user.id);
+      const uploadResult = await storageService.uploadFile('documents', storagePath, req.file.buffer, req.file.mimetype);
+      newUser.document_url = uploadResult.publicUrl;
       newUser.document_file_name = req.file.originalname;
+      newUser.document_storage_path = uploadResult.storagePath;
     }
 
     // Create user profile in database
@@ -166,7 +170,10 @@ router.put('/profile', authenticate, upload.single('avatar'), async (req, res) =
     });
 
     if (req.file) {
-      updates.avatar_url = `/uploads/avatars/${req.file.filename}`;
+      const storagePath = storageService.generateStoragePath('avatars', req.file.originalname, req.user.id);
+      const uploadResult = await storageService.uploadFile('avatars', storagePath, req.file.buffer, req.file.mimetype);
+      updates.avatar_url = uploadResult.publicUrl;
+      updates.avatar_storage_path = uploadResult.storagePath;
     }
 
     if (Object.keys(updates).length === 0) {

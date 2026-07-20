@@ -47,10 +47,9 @@ app.use(morgan('dev'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// =====================
-// Static Files (Uploads)
-// =====================
-app.use('/uploads', express.static(path.resolve(__dirname, '../uploads')));
+// Note: Static file serving for uploads is removed.
+// All files are now stored in Supabase Storage and served via signed URLs.
+// See the storage service and download endpoints for file access.
 
 // =====================
 // API Routes
